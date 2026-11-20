@@ -34,7 +34,7 @@ def get_limits(color):
 print("This is testing and practice for OpenCV\n Firstly, lets try to load an image")
 #image = cv2.imread('three_balls.png')
 print("Current directory:", os.getcwd())
-print("Video exists:", os.path.exists('dog_gait_front_rignt_markers.mp4'))
+print("Video exists:", os.path.exists('david_marked_fill.mp4'))
 #image = cv2.imread('s_dog2.png')
 #image = cv2.imread('"C:/Users/david/Java Workspace/s_dog.png"')
 
@@ -52,7 +52,20 @@ lower_lim_yellow, upper_lim_yellow = get_limits(yellow)
 lower_lim_red, upper_lim_red = get_limits(red)
 lower_lim_pink, upper_lim_pink = get_limits(pink)
 
-lower_lim_green, upper_lim_green = get_limits(green)
+#lower_lim_green, upper_lim_green = get_limits(green)
+
+
+# THESE BLUE AND RED LIMITS ARE HARD CODED TO ACCOUNT FOR THE FACT THAT THE MARKERS ARE NOT PURE BLUE OR PURE RED, AND THE HUE RANGE IS LIMITED.
+# Blue: widen downward to cover hue ~108
+lower_lim_blue = np.array([95, 100, 80])
+upper_lim_blue = np.array([130, 255, 255])
+lower_lim_green = np.array([55, 100, 80])
+upper_lim_green = np.array([90, 255, 255])
+
+# Red: build the mask from two ranges, because red wraps around
+lower_red1 = np.array([0, 100, 80]);   upper_red1 = np.array([10, 255, 255])
+lower_red2 = np.array([165, 100, 80]); upper_red2 = np.array([180, 255, 255])
+
 
 #CODE FROM CLAUDE
 kernel = np.ones((5, 5), np.uint8)
@@ -76,7 +89,7 @@ def get_sleeve_roi(hsv_image, grow_px=12, min_sleeve_area=1500):
             cv2.MORPH_ELLIPSE, (2*grow_px+1, 2*grow_px+1)))
     return roi
 
-def find_marker_center(mask, min_area=60,max_area=800):
+def find_marker_center(mask, min_area=60,max_area=20000):
 
     contours, _ = cv2.findContours(
         mask,
@@ -103,7 +116,7 @@ cv2.namedWindow("annotated", cv2.WINDOW_NORMAL)
 cv2.resizeWindow("annotated", 1280, 720)
 
 cv2.namedWindow("combovideo", cv2.WINDOW_NORMAL)
-cv2.resizeWindow("combovideo", 1280, 720)
+cv2.resizeWindow("combovideo", 960, 540)
 
 
 
@@ -112,7 +125,7 @@ test_vid = True
 if test_vid:
     #now lets load a video and display it frame by frame
     #create video object 
-    video = cv2.VideoCapture('dog_gait_front_right_markers.mp4')
+    video = cv2.VideoCapture('david_marked_fill.mp4')
 
     #necessary information for writing to a video file
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
@@ -120,12 +133,15 @@ if test_vid:
     frame_height = int(video.get(cv2.CAP_PROP_FRAME_HEIGHT))
     output = cv2.VideoWriter("output_vid.mp4",fourcc,30.0,(frame_width, frame_height))
     output2 = cv2.VideoWriter("output_masked.mp4",fourcc,30.0,(frame_width, frame_height),isColor=False)
+    print("Video width: " + str(frame_width))
+    print("Video height: " + str(frame_height))
 
     #xcenterarray = []
     #ycenterarray = []
     blue_path = []
     red_path = []
     yellow_path = []
+    green_path = []
 
     ret = True
     while ret:
@@ -138,16 +154,17 @@ if test_vid:
             #roi = get_sleeve_roi(hsv_image)
             
             # color masks, each restricted to the sleeve region
-            #maskY = cv2.bitwise_and(cv2.inRange(hsv_image, lower_lim_yellow, upper_lim_yellow),hsv_image)
-            #maskB = cv2.bitwise_and(cv2.inRange(hsv_image, lower_lim_blue, upper_lim_blue))
-            #maskR = cv2.bitwise_and(cv2.inRange(hsv_image, lower_lim_red, upper_lim_red))
             
+            maskG = cv2.inRange(hsv_image, lower_lim_green, upper_lim_green)
             maskY = cv2.inRange(hsv_image, lower_lim_yellow, upper_lim_yellow)
+           # maskB = cv2.inRange(hsv_image, lower_lim_blue, upper_lim_blue)
+            #maskR = cv2.inRange(hsv_image, lower_lim_red, upper_lim_red)
             maskB = cv2.inRange(hsv_image, lower_lim_blue, upper_lim_blue)
-            maskR = cv2.inRange(hsv_image, lower_lim_red, upper_lim_red)
-
+            maskR = cv2.bitwise_or(
+                cv2.inRange(hsv_image, lower_red1, upper_red1),
+                cv2.inRange(hsv_image, lower_red2, upper_red2))
             # clean each mask a little
-            maskY, maskB, maskR = [cv2.morphologyEx(m, cv2.MORPH_OPEN, kernel) for m in (maskY, maskB, maskR)]
+            maskG, maskY, maskB, maskR = [cv2.morphologyEx(m, cv2.MORPH_OPEN, kernel) for m in (maskG, maskY, maskB, maskR)]
 
            
 
@@ -157,17 +174,21 @@ if test_vid:
            
             combo_image = cv2.bitwise_or(maskY, maskB)
             combo_image = cv2.bitwise_or(combo_image, maskR)
+            combo_image = cv2.bitwise_or(combo_image, maskG)
+
             annotated = frame.copy()
 
             blue_center = find_marker_center(maskB)
             red_center = find_marker_center(maskR)
             yellow_center = find_marker_center(maskY)
+            green_center = find_marker_center(maskG)
 
             # Draw markers on original frame
             for center, color in [
                 (blue_center, (255, 0, 0)),
                 (red_center, (0, 0, 255)),
-                (yellow_center, (0, 255, 255))
+                (yellow_center, (0, 255, 255)),
+                (green_center, (0, 255, 0))
             ]:
 
                 if center is not None:
@@ -190,7 +211,7 @@ if test_vid:
             for cnt in contours:
                 print("Contour area: " + str(cv2.contourArea(cnt)))
             #if cv2.contourArea(cnt) > 100: #filter out small contours
-                if cv2.contourArea(cnt) > 60 and cv2.contourArea(cnt) < 800: #filter out small contours and large contours
+                if cv2.contourArea(cnt) > 60 and cv2.contourArea(cnt) < 20000: #filter out small contours and large contours
                 
                     print(cv2.contourArea(cnt))
                     cv2.drawContours(combo_image, [cnt], 0, (0,255,0), 3) #draw the contours on the image
@@ -202,27 +223,32 @@ if test_vid:
 # Only calculate angle if all three markers are detected
                 if (blue_center is not None and
                     red_center is not None and
-                    yellow_center is not None):
+                    yellow_center is not None and
+                    green_center is not None):
 
                     blue_path.append(blue_center)
                     red_path.append(red_center)
                     yellow_path.append(yellow_center)
+                    green_path.append(green_center)
 
                     # get coordinates
                     x1, y1 = blue_center
                     x2, y2 = red_center
                     x3, y3 = yellow_center
+                    x4, y4 = green_center
 
                     # Calculate vectors
                     # Both vectors originate at the middle joint
                     v1 = np.array([x1-x2, y1-y2])
                     v2 = np.array([x3-x2, y3-y2])
+                    v3 = np.array([x4-x3, y4-y3])  # Vector from yellow to green
 
                     # Calculate vector magnitudes
                     magnitude_v1 = np.linalg.norm(v1)
                     magnitude_v2 = np.linalg.norm(v2)
+                    magnitude_v3 = np.linalg.norm(v3)
 
-                    if magnitude_v1 > 0 and magnitude_v2 > 0:
+                    if magnitude_v1 > 0 and magnitude_v2 > 0 and magnitude_v3 > 0:
 
                         # Calculate angle using dot product
                         dot_product = np.dot(v1, v2)
@@ -234,6 +260,8 @@ if test_vid:
 
                         angle = np.arccos(cosine)
                         angle_degrees = np.degrees(angle)
+
+                        angle_paw = np.degrees(np.arccos(np.clip(np.dot(v2, v3) / (magnitude_v2 * magnitude_v3), -1.0, 1.0)))
 
                         # Display angle on annotated video
                         if angle_degrees > 70:
@@ -247,14 +275,24 @@ if test_vid:
                                 2,
                                 cv2.LINE_AA
                             )
+                            cv2.putText(
+                                annotated,
+                                "Joint angle: " + str(round(angle_paw, 2)),
+                                (int(x4), int(y4)),
+                                cv2.FONT_HERSHEY_SIMPLEX,
+                                0.8,
+                                (0, 255, 255),
+                                2,
+                                cv2.LINE_AA
+                            )
 
                         print("Angle in degrees:", angle_degrees)
 
                         # Draw vectors on annotated video
                         cv2.arrowedLine(
                         annotated,
-                        (int(x2), int(y2)),
                         (int(x1), int(y1)),
+                        (int(x2), int(y2)),
                         (255, 0, 0),
                         2
                         )
@@ -266,10 +304,18 @@ if test_vid:
                         (0, 0, 255),
                         2
                         )
+                        cv2.arrowedLine(
+                        annotated,
+                        (int(x3), int(y3)),
+                        (int(x4), int(y4)),
+                        (0, 255, 0),
+                        2
+                        )
 
                     print("Blue center:", blue_center)
                     print("Red center:", red_center)
                     print("Yellow center:", yellow_center)
+                    print("Green center:", green_center)
                         #bad hard code
                
                     if angle_degrees > 70 :#HARD CODED, BECASUE DOG LEG SHOULDNT EXCEED 
@@ -306,6 +352,14 @@ if test_vid:
                     )
 
                 for point in yellow_path:
+                    cv2.circle(
+                        annotated,
+                        point,
+                        3,
+                        (0, 255, 0),
+                        -1
+                    )
+                for point in green_path:
                     cv2.circle(
                         annotated,
                         point,
